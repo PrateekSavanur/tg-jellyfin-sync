@@ -1,0 +1,11 @@
+.env
+.venv/
+local/
+tests/
+kubernetes/
+.github/
+**/__pycache__/
+*.egg-info/
+.pytest_cache/
+*.session
+*.session-journal

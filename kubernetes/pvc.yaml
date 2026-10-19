@@ -1,0 +1,14 @@
+# Telegram session + SQLite job log (k3s built-in local-path provisioner).
+# Lands on the media node because the Deployment is pinned there.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tg-jellyfin-sync-state
+  namespace: tg-jellyfin-sync
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 1Gi

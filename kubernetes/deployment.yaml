@@ -1,0 +1,88 @@
+# Secrets (Telegram / TMDB / Jellyfin) come from the tg-jellyfin-sync-secrets Secret,
+# created by Ansible (homelab repo: roles/tg_jellyfin_sync) — not tracked in git.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tg-jellyfin-sync
+  namespace: tg-jellyfin-sync
+  labels:
+    app: tg-jellyfin-sync
+spec:
+  replicas: 1             # one Telegram session + SQLite on a RWO volume — must stay at 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: tg-jellyfin-sync
+  template:
+    metadata:
+      labels:
+        app: tg-jellyfin-sync
+    spec:
+      # The HDD with the Jellyfin libraries is on this node
+      nodeSelector:
+        storage-type: media
+      initContainers:
+        # hostPath dirs are created root-owned; hand them to the app's non-root user
+        - name: prepare-dirs
+          image: busybox:1.37
+          command:
+            - sh
+            - -c
+            - mkdir -p /data/movies /data/tvshows /data/unsorted /data/staging && chown 1000:1000 /data /data/* /state
+          volumeMounts:
+            - name: library
+              mountPath: /data
+            - name: state
+              mountPath: /state
+      containers:
+        - name: tg-jellyfin-sync
+          image: prateeksavanur/tg-jellyfin-sync:latest
+          env:
+            - name: TZ
+              value: Asia/Kolkata
+            - name: TG_CHANNEL_ID
+              value: "-1004379722209"
+            - name: JELLYFIN_URL
+              value: http://jellyfin.homelab.svc.cluster.local:8096
+            - name: HOMELERT_WEBHOOK_URL
+              value: http://homelert.homelert.svc.cluster.local/webhook/tg-jellyfin-sync
+            - name: DELETE_AFTER_IMPORT
+              value: "true"
+            # Paths must match Jellyfin's mounts (/data/movies, /data/tvshows) so targeted
+            # refreshes resolve. Staging shares the /data mount so the final move is a rename.
+            - name: MOVIES_DIR
+              value: /data/movies
+            - name: TV_DIR
+              value: /data/tvshows
+            - name: UNSORTED_DIR
+              value: /data/unsorted
+            - name: STAGING_DIR
+              value: /data/staging
+            - name: STATE_DIR
+              value: /state
+          envFrom:
+            - secretRef:
+                name: tg-jellyfin-sync-secrets
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "128Mi"
+            limits:
+              cpu: "1"
+              memory: "512Mi"
+          volumeMounts:
+            - name: library
+              mountPath: /data
+            - name: state
+              mountPath: /state
+      volumes:
+        # One mount for staging + libraries: a rename across two mounts fails with EXDEV
+        # even on the same disk
+        - name: library
+          hostPath:
+            path: /mnt/media/library
+            type: DirectoryOrCreate
+        - name: state
+          persistentVolumeClaim:
+            claimName: tg-jellyfin-sync-state
