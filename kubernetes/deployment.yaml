@@ -37,7 +37,7 @@ spec:
               mountPath: /state
       containers:
         - name: tg-jellyfin-sync
-          image: prateeksavanur/tg-jellyfin-sync:latest
+          image: prateeksavanur/tg-jellyfin-sync:0cff24c1bbd0c2db61fef816fdce07b72cc89269
           env:
             - name: TZ
               value: Asia/Kolkata
