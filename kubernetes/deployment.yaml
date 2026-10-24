@@ -47,7 +47,7 @@ spec:
               value: http://jellyfin.homelab.svc.cluster.local:8096
             # Songs go to this playlist unless their caption has `#playlist Name` lines
             - name: DEFAULT_PLAYLIST
-              value: Old Songs
+              value: New Songs
             - name: HOMELERT_WEBHOOK_URL
               value: http://homelert.homelert.svc.cluster.local/webhook/tg-jellyfin-sync
             - name: DELETE_AFTER_IMPORT
