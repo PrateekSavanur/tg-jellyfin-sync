@@ -37,6 +37,21 @@ class Jellyfin:
             # Not fatal: Jellyfin's scheduled scan will still pick the file up
             log.warning("Jellyfin refresh failed for %s: %s", path, e)
 
+    async def scan_library(self, folder: Path) -> None:
+        """Scans the library containing `folder` now.
+
+        Jellyfin's own file watcher waits for a quiet period, which never comes during a batch upload.
+        """
+        r = await self._client.get("/Library/VirtualFolders")
+        r.raise_for_status()
+        libraries = [lib for lib in r.json() if str(folder) in lib.get("Locations", [])]
+        if not libraries:
+            raise RuntimeError(f"no Jellyfin library has the folder {folder}")
+        r = await self._client.post(f"/Items/{libraries[0]['ItemId']}/Refresh", params={
+            "Recursive": "true", "MetadataRefreshMode": "Default", "ImageRefreshMode": "Default",
+        })
+        r.raise_for_status()
+
     async def audio_index(self) -> dict[str, str]:
         """Path → item id of every song Jellyfin has indexed."""
         r = await self._client.get("/Items", params={

@@ -18,6 +18,7 @@ class FakeJellyfin:
         self.pending = {}          # path → polls left before it shows up
         self.playlists = {}        # id → {"Name", "items", "owner"}
         self.index_after_polls = index_after_polls
+        self.scans = []            # library ids refreshed
 
     def upload(self, path: Path, item_id: str):
         self.pending[str(path)] = (item_id, self.index_after_polls)
@@ -26,6 +27,14 @@ class FakeJellyfin:
         p, q = request.url.path, request.url.params
         if p == "/Users":
             return httpx.Response(200, json=self.users)
+        if p == "/Library/VirtualFolders":
+            return httpx.Response(200, json=[{"Name": "Movies", "ItemId": "lib-movies", "Locations": ["/data/movies"]},
+                                             {"Name": "Music", "ItemId": "lib-music", "Locations": ["/data/music"]}])
+        if p.startswith("/Items/") and p.endswith("/Refresh"):
+            self.scans.append(p.split("/")[2])
+            for path, (item_id, _) in self.pending.items():  # a scan indexes everything waiting
+                self.pending[path] = (item_id, 0)
+            return httpx.Response(204)
         if p == "/Items" and q.get("IncludeItemTypes") == "Audio":
             for path, (item_id, left) in list(self.pending.items()):
                 if left <= 0:
@@ -112,3 +121,9 @@ def test_named_user_owns_playlists():
     fake = FakeJellyfin()
     run_with(fake, lambda jf: jf.add_to_playlist("song-1", "Mine"), user="guest")
     assert next(iter(fake.playlists.values()))["owner"] == "u-guest"
+
+
+def test_scan_library_refreshes_the_library_with_that_folder():
+    fake = FakeJellyfin()
+    run_with(fake, lambda jf: jf.scan_library(Path("/data/music")))
+    assert fake.scans == ["lib-music"]

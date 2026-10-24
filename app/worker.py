@@ -31,6 +31,7 @@ class Importer:
         self.client, self.channel, self.cfg = client, channel, cfg
         self.store, self.tmdb, self.jellyfin = store, tmdb, jellyfin
         self.queue: asyncio.Queue[int] = asyncio.Queue()
+        self._last_scan = 0.0
 
     # ── Intake ────────────────────────────────────────────────────
 
@@ -176,13 +177,20 @@ class Importer:
     async def sync_playlists(self) -> None:
         """Adds queued songs to their playlists once Jellyfin has indexed them.
 
-        Jellyfin postpones its scan while files keep arriving, so during a batch upload songs can take
-        until the end of the batch to show up; they simply stay queued until then.
+        Jellyfin postpones its own scan while files keep arriving, so during a batch upload songs that
+        wait longer than playlist_scan_after trigger a scan of the music library (at most once per
+        playlist_scan_interval).
         """
         queued = await self.store.queued_playlists()
         if not queued:
             return
         index = await self.jellyfin.audio_index()
+        now = time.time()
+        waiting = [r for r in queued if r["path"] not in index and now - r["queued_at"] >= self.cfg.playlist_scan_after]
+        if waiting and now - self._last_scan >= self.cfg.playlist_scan_interval:
+            log.info("%d songs not indexed yet; asking Jellyfin to scan %s", len(waiting), self.cfg.music_dir)
+            self._last_scan = now
+            await self.jellyfin.scan_library(self.cfg.music_dir)
         for row in queued:
             if item_id := index.get(row["path"]):
                 await self.jellyfin.add_to_playlist(item_id, row["playlist"])

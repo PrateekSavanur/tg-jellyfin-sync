@@ -41,3 +41,6 @@ class Settings(BaseSettings):
     # Queued playlist additions are retried this often, and dropped with an alert after playlist_timeout
     playlist_sync_interval: float = 30.0
     playlist_timeout: float = 3600.0
+    # Songs still not indexed after this long trigger a library scan, at most once per interval
+    playlist_scan_after: float = 120.0
+    playlist_scan_interval: float = 300.0

@@ -304,3 +304,26 @@ def test_no_playlist_without_jellyfin(env, tmp_path):
 
     run(go())
     assert client.sent[-1][0] == "✅ Artist – Song song is uploaded to Jellyfin"
+
+
+def test_slow_indexing_triggers_one_library_scan(env, tmp_path):
+    cfg, client, build = env
+    cfg.music_dir = Path("/data/music")  # must match the fake's library location
+    cfg.playlist_scan_after = 0
+    fake = FakeJellyfin(index_after_polls=100)  # Jellyfin's own watcher would take ages
+    path = "/data/music/Artist/Album/Song.mp3"
+
+    async def go():
+        imp = await build()
+        imp.jellyfin = Jellyfin("http://jf", "key", transport=httpx.MockTransport(fake.handler))
+        fake.upload(Path(path), "song-1")
+        await imp.store.queue_playlists(path, ["New Songs"], "Artist – Song")
+        await imp.sync_playlists()   # not indexed → scan
+        await imp.sync_playlists()   # indexed now → added; no second scan within the interval
+        left = await imp.store.queued_playlists()
+        await imp.jellyfin.aclose()
+        return left
+
+    assert run(go()) == []
+    assert fake.scans == ["lib-music"]
+    assert by_name(fake) == {"New Songs": ["song-1"]}
