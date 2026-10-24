@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from mutagen.easyid3 import EasyID3
 
-from app.music import SongInfo, build_path, identify, is_audio
+from app.music import SongInfo, build_path, identify, is_audio, playlists_for
 
 MUSIC = Path("/data/music")
 # MPEG-1 Layer III, 128 kbps, 44.1 kHz — enough frames for mutagen to recognise an MP3
@@ -89,3 +89,20 @@ def test_is_audio():
     assert is_audio(None, "audio/mpeg")
     assert not is_audio("movie.mkv", "video/x-matroska")
     assert not is_audio("notes.txt", "text/plain")
+
+
+@pytest.mark.parametrize(
+    "caption, expected",
+    [
+        (None, ["Old Songs"]),
+        ("lovely song", ["Old Songs"]),
+        ("#playlist Road Trip", ["Road Trip"]),
+        ("#PLAYLIST  Road Trip \n#playlist Old Songs\n#playlist Road Trip", ["Road Trip", "Old Songs"]),
+    ],
+)
+def test_playlists_for(caption, expected):
+    assert playlists_for(caption, "Old Songs") == expected
+
+
+def test_no_default_playlist():
+    assert playlists_for("", None) == []

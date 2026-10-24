@@ -42,7 +42,7 @@ async def main() -> None:
         d.mkdir(parents=True, exist_ok=True)
 
     store = await Store.open(cfg.state_dir / "jobs.db")
-    tmdb, jellyfin = Tmdb(cfg.tmdb_api_key), Jellyfin(cfg.jellyfin_url, cfg.jellyfin_api_key)
+    tmdb, jellyfin = Tmdb(cfg.tmdb_api_key), Jellyfin(cfg.jellyfin_url, cfg.jellyfin_api_key, cfg.jellyfin_user)
     client = TelegramClient(str(cfg.state_dir / "bot"), cfg.tg_api_id, cfg.tg_api_hash)
     await client.start(bot_token=cfg.tg_bot_token)
     channel = await client.get_input_entity(cfg.tg_channel_id)

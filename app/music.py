@@ -20,6 +20,7 @@ AUDIO_EXTS = {".mp3", ".flac", ".m4a", ".aac", ".ogg", ".opus", ".wav", ".wma", 
 
 # "01 - Title", "01. Title", "1 Title" — track numbers people leave in filenames
 _TRACK_PREFIX = re.compile(r"^\s*(?P<n>\d{1,3})\s*(?:[-._)]\s*|\s+)(?=\D)")
+_PLAYLIST_TAG = re.compile(r"^#playlist\s+(?P<name>.+?)\s*$", re.I)
 # ID3v2.3 has no multi-value frames, so taggers join artists with "/" (or ";"): `Lata Mangeshkar/Mukesh`
 _ARTIST_SEP = re.compile(r"\s*[/;]\s*")
 
@@ -56,6 +57,12 @@ def identify(path: Path, filename: str | None, tg_title: str | None = None, tg_p
     artist = tags.get("albumartist") or tags.get("artist") or tg_performer or name_artist
     track = _number(tags.get("tracknumber")) or name_track
     return SongInfo(title=title, artists=split_artists(artist), album=tags.get("album"), track=track)
+
+
+def playlists_for(caption: str | None, default: str | None) -> list[str]:
+    """`#playlist Name` caption lines (one per playlist), else the default playlist."""
+    names = [m["name"] for line in (caption or "").splitlines() if (m := _PLAYLIST_TAG.match(line.strip()))]
+    return list(dict.fromkeys(names)) or ([default] if default else [])
 
 
 def split_artists(value: str | None) -> tuple[str, ...]:

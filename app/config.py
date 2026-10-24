@@ -18,6 +18,10 @@ class Settings(BaseSettings):
     tmdb_api_key: str | None = None
     jellyfin_url: str = "http://jellyfin.homelab.svc.cluster.local:8096"
     jellyfin_api_key: str | None = None
+    # Owner of the playlists songs are added to; unset = the first Jellyfin administrator
+    jellyfin_user: str | None = None
+    # Playlist for songs whose caption has no `#playlist Name` line; unset = no playlist
+    default_playlist: str | None = None
     homelert_webhook_url: str | None = None
 
     # Library paths must match what Jellyfin sees (same mount paths in both pods)

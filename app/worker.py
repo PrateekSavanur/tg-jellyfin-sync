@@ -31,6 +31,7 @@ class Importer:
         self.client, self.channel, self.cfg = client, channel, cfg
         self.store, self.tmdb, self.jellyfin = store, tmdb, jellyfin
         self.queue: asyncio.Queue[int] = asyncio.Queue()
+        self._background: set[asyncio.Task] = set()  # keeps playlist tasks alive until they finish
 
     # ── Intake ────────────────────────────────────────────────────
 
@@ -154,7 +155,26 @@ class Importer:
         await self.jellyfin.notify_created(dest)
         await self.store.set(msg.id, "done", dest=str(dest))
         log.info("Imported message %s → %s", msg.id, dest)
-        await self._finish(msg, status_id, f"✅ {info.label} song is uploaded to Jellyfin")
+
+        text = f"✅ {info.label} song is uploaded to Jellyfin"
+        playlists = music.playlists_for(msg.message, self.cfg.default_playlist) if self.jellyfin.enabled else []
+        if playlists:
+            text += f" · playlist: {', '.join(playlists)}"
+            self._in_background(self._add_to_playlists(dest, playlists, info.label))
+        await self._finish(msg, status_id, text)
+
+    async def _add_to_playlists(self, dest: Path, playlists: list[str], label: str) -> None:
+        # Runs after the reply: Jellyfin needs a few seconds to index the file before it can be added
+        try:
+            await self.jellyfin.add_to_playlists(dest, playlists)
+        except Exception as e:
+            log.exception("Adding %s to playlists %s failed", dest, playlists)
+            await alert(self.cfg.homelert_webhook_url, "Jellyfin playlist update failed", f"{label}: {e}")
+
+    def _in_background(self, coro) -> None:
+        task = asyncio.create_task(coro)
+        self._background.add(task)
+        task.add_done_callback(self._background.discard)
 
     async def _finish(self, msg: Message, status_id: int | None, text: str) -> None:
         """Posts the final message; with delete_after_import, removes the original and progress posts."""

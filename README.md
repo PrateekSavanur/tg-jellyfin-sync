@@ -17,6 +17,10 @@ named from the file's own tags, then Telegram's audio title/performer, then a `A
 filename. Songs without an album tag land in `Artist/Singles/`. Jellyfin reads the tags itself, so
 tag your files before uploading for the best result. Voice notes are skipped.
 
+Each song is also added to a Jellyfin playlist (created on first use): `DEFAULT_PLAYLIST`
+(`Old Songs` in the deployment), or the playlists named in the caption, one `#playlist Name` line
+each. Playlists need `JELLYFIN_API_KEY`; they belong to `JELLYFIN_USER` (default: the first admin).
+
 ## Local run
 
 ```bash

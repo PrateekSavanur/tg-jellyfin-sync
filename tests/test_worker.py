@@ -4,6 +4,7 @@ import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
+import httpx
 import pytest
 
 from app.config import Settings
@@ -11,6 +12,7 @@ from app.jellyfin import Jellyfin
 from app.store import Store
 from app.tmdb import Tmdb
 from app.worker import Importer
+from tests.test_jellyfin import FakeJellyfin, by_name
 from tests.test_music import write_mp3
 
 
@@ -245,3 +247,36 @@ def test_voice_note_skipped(env):
 
     assert run(go()) is None
     assert client.sent[-1][0].startswith("⚠️ Skipped")
+
+
+def test_song_added_to_default_playlist_in_background(env, tmp_path):
+    cfg, client, build = env
+    cfg.default_playlist = "Old Songs"
+    fake = FakeJellyfin()
+    content = tagged_mp3(tmp_path, title="Song", artist="Artist", album="Album")
+
+    async def go():
+        imp = await build()
+        imp.jellyfin = Jellyfin("http://jf", "key", transport=httpx.MockTransport(fake.handler))
+        fake.upload(cfg.music_dir / "Artist" / "Album" / "Song.mp3", "song-1")
+        await submit_and_process(imp, client, make_msg(1, "a.mp3", mime="audio/mpeg", content=content,
+                                                       caption="#playlist Evening"))
+        await asyncio.gather(*imp._background)
+        await imp.jellyfin.aclose()
+
+    run(go())
+    assert client.sent[-1][0] == "✅ Artist – Song song is uploaded to Jellyfin · playlist: Evening"
+    assert by_name(fake) == {"Evening": ["song-1"]}
+
+
+def test_no_playlist_without_jellyfin(env, tmp_path):
+    cfg, client, build = env
+    cfg.default_playlist = "Old Songs"
+
+    async def go():
+        imp = await build()
+        await submit_and_process(imp, client, make_msg(1, "a.mp3", mime="audio/mpeg",
+                                                       content=tagged_mp3(tmp_path, title="Song", artist="Artist")))
+
+    run(go())
+    assert client.sent[-1][0] == "✅ Artist – Song song is uploaded to Jellyfin"
