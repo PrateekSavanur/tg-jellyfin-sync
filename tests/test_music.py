@@ -24,7 +24,7 @@ def test_tags_win_over_filename(tmp_path):
     src = write_mp3(tmp_path / "1.part", title="Kajra Mohabbat Wala", artist="Asha Bhosle",
                     album="Kismet", tracknumber="3/8")
     info = identify(src, "random upload name.mp3", tg_title="Other", tg_performer="Someone")
-    assert info == SongInfo("Kajra Mohabbat Wala", "Asha Bhosle", "Kismet", 3)
+    assert info == SongInfo("Kajra Mohabbat Wala", ("Asha Bhosle",), "Kismet", 3)
     assert build_path(info, ".mp3", MUSIC) == MUSIC / "Asha Bhosle" / "Kismet" / "03 - Kajra Mohabbat Wala.mp3"
     assert info.label == "Asha Bhosle – Kajra Mohabbat Wala"
 
@@ -33,6 +33,26 @@ def test_album_artist_groups_compilations(tmp_path):
     src = write_mp3(tmp_path / "1.part", title="Song", artist="Guest Singer", albumartist="R. D. Burman",
                     album="Sholay")
     assert identify(src, "x.mp3").artist == "R. D. Burman"
+
+
+@pytest.mark.parametrize("artist", ["K. J. Yesudas/ Hemlata", "K. J. Yesudas/Hemlata", "K. J. Yesudas; Hemlata"])
+def test_joined_artists_filed_under_the_first(tmp_path, artist):
+    src = write_mp3(tmp_path / "1.part", title="Jab Deep Jale Aana", artist=artist, album="Chitchor", tracknumber="1")
+    info = identify(src, "x.mp3")
+    assert build_path(info, ".mp3", MUSIC) == MUSIC / "K. J. Yesudas" / "Chitchor" / "01 - Jab Deep Jale Aana.mp3"
+    assert info.label == "K. J. Yesudas, Hemlata – Jab Deep Jale Aana"
+
+
+def test_multi_value_artist_tag(tmp_path):
+    src = write_mp3(tmp_path / "1.part", title="Song", artist=["Lata Mangeshkar", "Mukesh"], album="Album")
+    info = identify(src, "x.mp3")
+    assert info.artist == "Lata Mangeshkar"
+    assert info.label == "Lata Mangeshkar, Mukesh – Song"
+
+
+def test_hyphenated_artist_names_kept_whole(tmp_path):
+    src = write_mp3(tmp_path / "1.part", title="Song", albumartist="Kalyanji - Anandji", album="Saraswatichandra")
+    assert identify(src, "x.mp3").artist == "Kalyanji - Anandji"
 
 
 def test_telegram_metadata_when_untagged(tmp_path):
