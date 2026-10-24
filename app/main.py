@@ -62,13 +62,16 @@ async def main() -> None:
     log.info("Watching channel %s (TMDB %s, Jellyfin refresh %s)", cfg.tg_channel_id,
              "on" if tmdb.enabled else "off", "on" if jellyfin.enabled else "off")
 
-    workers = asyncio.create_task(importer.run_workers())
+    tasks = [asyncio.create_task(importer.run_workers())]
+    if jellyfin.enabled:
+        tasks.append(asyncio.create_task(importer.run_playlist_sync()))
     # As PID 1 in a container, Python would otherwise ignore SIGTERM until the kill timeout
     asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, client.disconnect)
     try:
         await client.run_until_disconnected()
     finally:
-        workers.cancel()
+        for task in tasks:
+            task.cancel()
         await asyncio.gather(tmdb.aclose(), jellyfin.aclose(), store.close())
 
 

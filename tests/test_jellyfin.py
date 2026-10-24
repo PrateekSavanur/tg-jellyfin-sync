@@ -5,8 +5,6 @@ import json
 from pathlib import Path
 
 import httpx
-import pytest
-
 from app.jellyfin import Jellyfin
 
 SONG = Path("/data/music/Lata Mangeshkar/Album/01 - Song.mp3")
@@ -66,16 +64,26 @@ def by_name(fake):
     return {pl["Name"]: pl["items"] for pl in fake.playlists.values()}
 
 
-def test_waits_for_indexing_then_creates_playlist_for_admin():
-    fake = FakeJellyfin(index_after_polls=2)
-    fake.upload(SONG, "song-1")
-
+def run_with(fake, coro_fn, user=None):
     async def go():
-        jf = client(fake)
-        await jf.add_to_playlists(SONG, ["Old Songs"], poll=0)
-        await jf.aclose()
+        jf = client(fake, user)
+        try:
+            return await coro_fn(jf)
+        finally:
+            await jf.aclose()
 
-    asyncio.run(go())
+    return asyncio.run(go())
+
+
+def test_audio_index_maps_every_indexed_path():
+    fake = FakeJellyfin()
+    fake.upload(SONG, "song-1")
+    assert run_with(fake, lambda jf: jf.audio_index()) == {str(SONG): "song-1"}
+
+
+def test_creates_playlist_for_admin():
+    fake = FakeJellyfin()
+    run_with(fake, lambda jf: jf.add_to_playlist("song-1", "Old Songs"))
     assert by_name(fake) == {"Old Songs": ["song-1"]}
     assert next(iter(fake.playlists.values()))["owner"] == "u-root"
 
@@ -83,75 +91,24 @@ def test_waits_for_indexing_then_creates_playlist_for_admin():
 def test_existing_playlist_reused_and_no_duplicate_entries():
     fake = FakeJellyfin()
     fake.playlists["pl-old"] = {"Name": "old songs", "items": ["song-1"], "owner": "u-root"}
-    fake.upload(SONG, "song-1")
-
-    async def go():
-        jf = client(fake)
-        await jf.add_to_playlists(SONG, ["Old Songs"], poll=0)
-        await jf.aclose()
-
-    asyncio.run(go())
+    run_with(fake, lambda jf: jf.add_to_playlist("song-1", "Old Songs"))
     assert list(fake.playlists) == ["pl-old"]
     assert fake.playlists["pl-old"]["items"] == ["song-1"]
 
 
-def test_concurrent_songs_create_the_playlist_once():
-    fake = FakeJellyfin()
-    other = SONG.with_name("02 - Other.mp3")
-    fake.upload(SONG, "song-1")
-    fake.upload(other, "song-2")
-
-    async def go():
-        jf = client(fake)
-        await asyncio.gather(jf.add_to_playlists(SONG, ["Old Songs"], poll=0),
-                             jf.add_to_playlists(other, ["Old Songs"], poll=0))
-        await jf.aclose()
-
-    asyncio.run(go())
-    assert len(fake.playlists) == 1
-    assert sorted(by_name(fake)["Old Songs"]) == ["song-1", "song-2"]
-
-
 def test_playlist_deleted_in_jellyfin_is_recreated():
     fake = FakeJellyfin()
-    fake.upload(SONG, "song-1")
-    other = SONG.with_name("02 - Other.mp3")
-    fake.upload(other, "song-2")
 
-    async def go():
-        jf = client(fake)
-        await jf.add_to_playlists(SONG, ["Old Songs"], poll=0)
+    async def go(jf):
+        await jf.add_to_playlist("song-1", "Old Songs")
         fake.playlists.clear()  # user deleted it
-        await jf.add_to_playlists(other, ["Old Songs"], poll=0)
-        await jf.aclose()
+        await jf.add_to_playlist("song-2", "Old Songs")
 
-    asyncio.run(go())
+    run_with(fake, go)
     assert by_name(fake) == {"Old Songs": ["song-2"]}
 
 
 def test_named_user_owns_playlists():
     fake = FakeJellyfin()
-    fake.upload(SONG, "song-1")
-
-    async def go():
-        jf = client(fake, user="guest")
-        await jf.add_to_playlists(SONG, ["Mine"], poll=0)
-        await jf.aclose()
-
-    asyncio.run(go())
+    run_with(fake, lambda jf: jf.add_to_playlist("song-1", "Mine"), user="guest")
     assert next(iter(fake.playlists.values()))["owner"] == "u-guest"
-
-
-def test_gives_up_when_never_indexed():
-    fake = FakeJellyfin()
-
-    async def go():
-        jf = client(fake)
-        try:
-            await jf.add_to_playlists(SONG, ["Old Songs"], timeout=0, poll=0)
-        finally:
-            await jf.aclose()
-
-    with pytest.raises(TimeoutError):
-        asyncio.run(go())
-    assert fake.playlists == {}

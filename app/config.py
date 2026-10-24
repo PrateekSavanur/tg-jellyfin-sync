@@ -38,3 +38,6 @@ class Settings(BaseSettings):
     delete_after_import: bool = True
     concurrency: int = 1
     progress_interval: float = 10.0
+    # Queued playlist additions are retried this often, and dropped with an alert after playlist_timeout
+    playlist_sync_interval: float = 30.0
+    playlist_timeout: float = 3600.0

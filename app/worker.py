@@ -31,7 +31,6 @@ class Importer:
         self.client, self.channel, self.cfg = client, channel, cfg
         self.store, self.tmdb, self.jellyfin = store, tmdb, jellyfin
         self.queue: asyncio.Queue[int] = asyncio.Queue()
-        self._background: set[asyncio.Task] = set()  # keeps playlist tasks alive until they finish
 
     # ── Intake ────────────────────────────────────────────────────
 
@@ -160,21 +159,42 @@ class Importer:
         playlists = music.playlists_for(msg.message, self.cfg.default_playlist) if self.jellyfin.enabled else []
         if playlists:
             text += f" · playlist: {', '.join(playlists)}"
-            self._in_background(self._add_to_playlists(dest, playlists, info.label))
+            # Added by run_playlist_sync once Jellyfin has indexed the file
+            await self.store.queue_playlists(str(dest), playlists, info.label)
         await self._finish(msg, status_id, text)
 
-    async def _add_to_playlists(self, dest: Path, playlists: list[str], label: str) -> None:
-        # Runs after the reply: Jellyfin needs a few seconds to index the file before it can be added
-        try:
-            await self.jellyfin.add_to_playlists(dest, playlists)
-        except Exception as e:
-            log.exception("Adding %s to playlists %s failed", dest, playlists)
-            await alert(self.cfg.homelert_webhook_url, "Jellyfin playlist update failed", f"{label}: {e}")
+    # ── Playlists ─────────────────────────────────────────────────
 
-    def _in_background(self, coro) -> None:
-        task = asyncio.create_task(coro)
-        self._background.add(task)
-        task.add_done_callback(self._background.discard)
+    async def run_playlist_sync(self) -> None:
+        while True:
+            try:
+                await self.sync_playlists()
+            except Exception:
+                log.exception("Playlist sync failed; retrying in %ss", self.cfg.playlist_sync_interval)
+            await asyncio.sleep(self.cfg.playlist_sync_interval)
+
+    async def sync_playlists(self) -> None:
+        """Adds queued songs to their playlists once Jellyfin has indexed them.
+
+        Jellyfin postpones its scan while files keep arriving, so during a batch upload songs can take
+        until the end of the batch to show up; they simply stay queued until then.
+        """
+        queued = await self.store.queued_playlists()
+        if not queued:
+            return
+        index = await self.jellyfin.audio_index()
+        for row in queued:
+            if item_id := index.get(row["path"]):
+                await self.jellyfin.add_to_playlist(item_id, row["playlist"])
+                log.info("Added %s to playlist %r", row["path"], row["playlist"])
+            elif time.time() - row["queued_at"] < self.cfg.playlist_timeout:
+                continue
+            else:
+                hours = self.cfg.playlist_timeout / 3600
+                await alert(self.cfg.homelert_webhook_url, "Jellyfin playlist update failed",
+                            f"{row['label']} was not indexed by Jellyfin within {hours:g} h, "
+                            f"so it was not added to {row['playlist']}")
+            await self.store.unqueue_playlist(row["path"], row["playlist"])
 
     async def _finish(self, msg: Message, status_id: int | None, text: str) -> None:
         """Posts the final message; with delete_after_import, removes the original and progress posts."""

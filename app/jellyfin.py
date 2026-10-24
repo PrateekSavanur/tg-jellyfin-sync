@@ -37,45 +37,28 @@ class Jellyfin:
             # Not fatal: Jellyfin's scheduled scan will still pick the file up
             log.warning("Jellyfin refresh failed for %s: %s", path, e)
 
-    async def add_to_playlists(self, path: Path, playlists: list[str], timeout: float = 300, poll: float = 5) -> None:
-        """Waits for Jellyfin to index the file, then adds it to each playlist, creating any that are missing.
+    async def audio_index(self) -> dict[str, str]:
+        """Path → item id of every song Jellyfin has indexed."""
+        r = await self._client.get("/Items", params={
+            "Recursive": "true", "IncludeItemTypes": "Audio", "Fields": "Path", "EnableImages": "false",
+        }, timeout=60)
+        r.raise_for_status()
+        return {i["Path"]: i["Id"] for i in r.json()["Items"] if i.get("Path")}
 
-        Raises on failure so the caller can report it.
-        """
-        if not self.enabled or not playlists:
-            return
-        item_id = await self._wait_for_item(path, timeout, poll)
+    async def add_to_playlist(self, item_id: str, name: str) -> None:
+        """Adds a song to the named playlist, creating the playlist if needed; no-op if it's already in it."""
         user_id = await self._user()
-        for name in playlists:
+        playlist_id = await self._playlist(name, user_id)
+        r = await self._client.get(f"/Playlists/{playlist_id}/Items", params={"userId": user_id})
+        if r.status_code == 404:  # deleted in Jellyfin since we cached its id
+            self._playlist_ids.pop(name, None)
             playlist_id = await self._playlist(name, user_id)
             r = await self._client.get(f"/Playlists/{playlist_id}/Items", params={"userId": user_id})
-            if r.status_code == 404:  # deleted in Jellyfin since we cached its id
-                self._playlist_ids.pop(name, None)
-                playlist_id = await self._playlist(name, user_id)
-                r = await self._client.get(f"/Playlists/{playlist_id}/Items", params={"userId": user_id})
-            r.raise_for_status()
-            if any(i["Id"] == item_id for i in r.json()["Items"]):
-                continue
-            r = await self._client.post(f"/Playlists/{playlist_id}/Items", params={"ids": item_id, "userId": user_id})
-            r.raise_for_status()
-            log.info("Added %s to playlist %r", path, name)
-
-    async def _wait_for_item(self, path: Path, timeout: float, poll: float) -> str:
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + timeout
-        while True:
-            # Newest audio first: the file was just added, so it's at the top once indexed
-            r = await self._client.get("/Items", params={
-                "Recursive": "true", "IncludeItemTypes": "Audio", "Fields": "Path",
-                "SortBy": "DateCreated", "SortOrder": "Descending", "Limit": 50,
-            })
-            r.raise_for_status()
-            for item in r.json()["Items"]:
-                if item.get("Path") == str(path):
-                    return item["Id"]
-            if loop.time() >= deadline:
-                raise TimeoutError(f"Jellyfin did not index {path} within {timeout:.0f}s")
-            await asyncio.sleep(poll)
+        r.raise_for_status()
+        if any(i["Id"] == item_id for i in r.json()["Items"]):
+            return
+        r = await self._client.post(f"/Playlists/{playlist_id}/Items", params={"ids": item_id, "userId": user_id})
+        r.raise_for_status()
 
     async def _user(self) -> str:
         if self._user_id:

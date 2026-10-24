@@ -249,10 +249,10 @@ def test_voice_note_skipped(env):
     assert client.sent[-1][0].startswith("⚠️ Skipped")
 
 
-def test_song_added_to_default_playlist_in_background(env, tmp_path):
+def test_song_queued_then_added_once_jellyfin_indexes_it(env, tmp_path):
     cfg, client, build = env
     cfg.default_playlist = "Old Songs"
-    fake = FakeJellyfin()
+    fake = FakeJellyfin(index_after_polls=3)  # Jellyfin is busy: the first few lookups don't see it
     content = tagged_mp3(tmp_path, title="Song", artist="Artist", album="Album")
 
     async def go():
@@ -261,12 +261,36 @@ def test_song_added_to_default_playlist_in_background(env, tmp_path):
         fake.upload(cfg.music_dir / "Artist" / "Album" / "Song.mp3", "song-1")
         await submit_and_process(imp, client, make_msg(1, "a.mp3", mime="audio/mpeg", content=content,
                                                        caption="#playlist Evening"))
-        await asyncio.gather(*imp._background)
+        for _ in range(3):
+            await imp.sync_playlists()
+        still_queued = len(await imp.store.queued_playlists())
+        await imp.sync_playlists()
+        left = await imp.store.queued_playlists()
         await imp.jellyfin.aclose()
+        return still_queued, left
 
-    run(go())
+    still_queued, left = run(go())
     assert client.sent[-1][0] == "✅ Artist – Song song is uploaded to Jellyfin · playlist: Evening"
+    assert still_queued == 1 and left == []
     assert by_name(fake) == {"Evening": ["song-1"]}
+
+
+def test_never_indexed_song_dropped_after_timeout(env, tmp_path):
+    cfg, client, build = env
+    cfg.playlist_timeout = 0
+    fake = FakeJellyfin()
+
+    async def go():
+        imp = await build()
+        imp.jellyfin = Jellyfin("http://jf", "key", transport=httpx.MockTransport(fake.handler))
+        await imp.store.queue_playlists("/data/music/x.mp3", ["Old Songs"], "Artist – X")
+        await imp.sync_playlists()
+        left = await imp.store.queued_playlists()
+        await imp.jellyfin.aclose()
+        return left
+
+    assert run(go()) == []
+    assert fake.playlists == {}
 
 
 def test_no_playlist_without_jellyfin(env, tmp_path):

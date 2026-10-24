@@ -19,6 +19,14 @@ CREATE TABLE IF NOT EXISTS jobs (
 );
 CREATE INDEX IF NOT EXISTS jobs_doc ON jobs(doc_id);
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+-- Songs waiting for Jellyfin to index them before they can be added to a playlist
+CREATE TABLE IF NOT EXISTS playlist_queue (
+    path        TEXT NOT NULL,
+    playlist    TEXT NOT NULL,
+    label       TEXT NOT NULL,   -- for the alert if it never shows up
+    queued_at   REAL NOT NULL,
+    PRIMARY KEY (path, playlist)
+);
 """
 
 
@@ -86,6 +94,21 @@ class Store:
             "ON CONFLICT(key) DO UPDATE SET value = MAX(CAST(value AS INTEGER), excluded.value)",
             (msg_id,),
         )
+        await self.db.commit()
+
+    async def queue_playlists(self, path: str, playlists: list[str], label: str) -> None:
+        await self.db.executemany(
+            "INSERT OR IGNORE INTO playlist_queue (path, playlist, label, queued_at) VALUES (?, ?, ?, ?)",
+            [(path, name, label, time.time()) for name in playlists],
+        )
+        await self.db.commit()
+
+    async def queued_playlists(self) -> list[aiosqlite.Row]:
+        async with self.db.execute("SELECT * FROM playlist_queue ORDER BY queued_at") as cur:
+            return await cur.fetchall()
+
+    async def unqueue_playlist(self, path: str, playlist: str) -> None:
+        await self.db.execute("DELETE FROM playlist_queue WHERE path = ? AND playlist = ?", (path, playlist))
         await self.db.commit()
 
     async def close(self) -> None:

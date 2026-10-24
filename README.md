@@ -20,6 +20,9 @@ tag your files before uploading for the best result. Voice notes are skipped.
 Each song is also added to a Jellyfin playlist (created on first use): `DEFAULT_PLAYLIST`
 (`Old Songs` in the deployment), or the playlists named in the caption, one `#playlist Name` line
 each. Playlists need `JELLYFIN_API_KEY`; they belong to `JELLYFIN_USER` (default: the first admin).
+Jellyfin postpones scanning while files keep arriving, so during a batch upload songs join their
+playlist once Jellyfin catches up (often after the batch). Pending additions are kept in the job
+database and retried every 30 s; a song not indexed within an hour is dropped with a Homelert alert.
 
 ## Local run
 
