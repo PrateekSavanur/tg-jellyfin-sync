@@ -35,7 +35,8 @@ def test_album_artist_groups_compilations(tmp_path):
     assert identify(src, "x.mp3").artist == "R. D. Burman"
 
 
-@pytest.mark.parametrize("artist", ["K. J. Yesudas/ Hemlata", "K. J. Yesudas/Hemlata", "K. J. Yesudas; Hemlata"])
+@pytest.mark.parametrize("artist", ["K. J. Yesudas/ Hemlata", "K. J. Yesudas/Hemlata", "K. J. Yesudas; Hemlata",
+                                    "K. J. Yesudas, Hemlata"])
 def test_joined_artists_filed_under_the_first(tmp_path, artist):
     src = write_mp3(tmp_path / "1.part", title="Jab Deep Jale Aana", artist=artist, album="Chitchor", tracknumber="1")
     info = identify(src, "x.mp3")
@@ -48,6 +49,14 @@ def test_multi_value_artist_tag(tmp_path):
     info = identify(src, "x.mp3")
     assert info.artist == "Lata Mangeshkar"
     assert info.label == "Lata Mangeshkar, Mukesh – Song"
+
+
+def test_comma_needs_a_space_to_split(tmp_path):
+    src = write_mp3(tmp_path / "1.part", title="Tu Jo Mila", artist="K.K., Pritam", album="Bajrangi Bhaijaan")
+    info = identify(src, "x.mp3")
+    assert info.artists == ("K.K.", "Pritam")
+    # sanitize() drops the trailing dot from the folder; Jellyfin still shows "K.K." from the tag
+    assert build_path(info, ".mp3", MUSIC) == MUSIC / "K.K" / "Bajrangi Bhaijaan" / "Tu Jo Mila.mp3"
 
 
 def test_hyphenated_artist_names_kept_whole(tmp_path):

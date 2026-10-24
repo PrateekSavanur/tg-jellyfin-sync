@@ -21,8 +21,10 @@ AUDIO_EXTS = {".mp3", ".flac", ".m4a", ".aac", ".ogg", ".opus", ".wav", ".wma", 
 # "01 - Title", "01. Title", "1 Title" — track numbers people leave in filenames
 _TRACK_PREFIX = re.compile(r"^\s*(?P<n>\d{1,3})\s*(?:[-._)]\s*|\s+)(?=\D)")
 _PLAYLIST_TAG = re.compile(r"^#playlist\s+(?P<name>.+?)\s*$", re.I)
-# ID3v2.3 has no multi-value frames, so taggers join artists with "/" (or ";"): `Lata Mangeshkar/Mukesh`
-_ARTIST_SEP = re.compile(r"\s*[/;]\s*")
+# ID3v2.3 has no multi-value frames, so taggers join artists with "/", ";" or ", ":
+# `Lata Mangeshkar/Mukesh`, `Arijit Singh, Mithoon`. A comma only counts with a space after it,
+# so `K.K., Pritam` splits into K.K. and Pritam. (Names that contain ", " get split too.)
+_ARTIST_SEP = re.compile(r"\s*[/;]\s*|,\s+")
 
 
 @dataclass(frozen=True)
