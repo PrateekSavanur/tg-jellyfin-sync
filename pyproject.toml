@@ -1,12 +1,13 @@
 [project]
 name = "tg-jellyfin-sync"
 version = "0.1.0"
-description = "Imports media posted to a private Telegram channel into Jellyfin libraries"
+description = "Imports media and music posted to a private Telegram channel into Jellyfin libraries"
 requires-python = ">=3.12"
 dependencies = [
     "telethon>=1.36",
     "cryptg>=0.5",
     "guessit>=3.8",
+    "mutagen>=1.47",
     "httpx>=0.27",
     "aiosqlite>=0.20",
     "pydantic-settings>=2.4",

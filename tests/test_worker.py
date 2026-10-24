@@ -11,11 +11,17 @@ from app.jellyfin import Jellyfin
 from app.store import Store
 from app.tmdb import Tmdb
 from app.worker import Importer
+from tests.test_music import write_mp3
 
 
-def make_msg(msg_id, name, size=1000, caption="", doc_id=None):
-    file = SimpleNamespace(name=name, size=size, mime_type="video/x-matroska", ext=".mkv")
-    return SimpleNamespace(id=msg_id, document=SimpleNamespace(id=doc_id or msg_id), file=file, message=caption)
+def make_msg(msg_id, name, size=1000, caption="", doc_id=None, mime="video/x-matroska", content=None,
+             title=None, performer=None, voice=None):
+    if content is not None:
+        size = len(content)
+    file = SimpleNamespace(name=name, size=size, mime_type=mime, ext=Path(name or "").suffix or ".mkv",
+                           title=title, performer=performer)
+    return SimpleNamespace(id=msg_id, document=SimpleNamespace(id=doc_id or msg_id), file=file, message=caption,
+                           voice=voice, content=content)
 
 
 class FakeClient:
@@ -38,14 +44,15 @@ class FakeClient:
         self.deleted.extend(ids)
 
     async def download_media(self, msg, file, progress_callback=None):
-        Path(file).write_bytes(b"x" * msg.file.size)
+        Path(file).write_bytes(msg.content if msg.content is not None else b"x" * msg.file.size)
 
 
 @pytest.fixture
 def env(tmp_path):
     cfg = Settings(
         tg_api_id=1, tg_api_hash="h", tg_bot_token="t", tg_channel_id=-100,
-        movies_dir=tmp_path / "movies", tv_dir=tmp_path / "tv", unsorted_dir=tmp_path / "unsorted",
+        movies_dir=tmp_path / "movies", tv_dir=tmp_path / "tv", music_dir=tmp_path / "music",
+        unsorted_dir=tmp_path / "unsorted",
         staging_dir=tmp_path / "staging", state_dir=tmp_path / "state", max_file_size=5000,
         _env_file=None,
     )
@@ -175,3 +182,66 @@ def test_keep_original_when_delete_disabled(env):
     run(go())
     assert client.deleted == []
     assert "✅ Inception (2010) movie is uploaded to Jellyfin" in client.edits.values()
+
+
+def tagged_mp3(tmp_path, **tags) -> bytes:
+    return write_mp3(tmp_path / "upload.mp3", **tags).read_bytes()
+
+
+def test_song_filed_by_tags(env, tmp_path):
+    cfg, client, build = env
+    content = tagged_mp3(tmp_path, title="Lag Jaa Gale", artist="Lata Mangeshkar", album="Woh Kaun Thi?",
+                         tracknumber="2")
+
+    async def go():
+        imp = await build()
+        await submit_and_process(imp, client, make_msg(1, "lag jaa gale.mp3", mime="audio/mpeg", content=content))
+        return await imp.store.get(1)
+
+    job = run(go())
+    dest = cfg.music_dir / "Lata Mangeshkar" / "Woh Kaun Thi" / "02 - Lag Jaa Gale.mp3"
+    assert dest.read_bytes() == content
+    assert job["status"] == "done" and job["dest"] == str(dest)
+    assert client.sent[-1] == ("✅ Lata Mangeshkar – Lag Jaa Gale song is uploaded to Jellyfin", None)
+    assert 1 in client.deleted
+    assert not list(cfg.staging_dir.iterdir())
+    assert not cfg.movies_dir.exists() or not any(cfg.movies_dir.iterdir())
+
+
+def test_untagged_song_uses_telegram_metadata(env, tmp_path):
+    cfg, client, build = env
+    msg = make_msg(1, "AUD-001.mp3", mime="audio/mpeg", content=tagged_mp3(tmp_path),
+                   title="Chura Liya Hai Tumne", performer="Asha Bhosle")
+
+    async def go():
+        imp = await build()
+        await submit_and_process(imp, client, msg)
+
+    run(go())
+    assert (cfg.music_dir / "Asha Bhosle" / "Singles" / "Chura Liya Hai Tumne.mp3").exists()
+
+
+def test_same_song_twice_is_duplicate(env, tmp_path):
+    cfg, client, build = env
+    content = tagged_mp3(tmp_path, title="Song", artist="Artist")
+
+    async def go():
+        imp = await build()
+        await submit_and_process(imp, client, make_msg(1, "a.mp3", mime="audio/mpeg", content=content, doc_id=9))
+        await submit_and_process(imp, client, make_msg(2, "a.mp3", mime="audio/mpeg", content=content, doc_id=9))
+        return await imp.store.get(2)
+
+    assert run(go())["status"] == "duplicate"
+    assert client.sent[-1][0] == "♻️ `Song.mp3` is already in Jellyfin"
+
+
+def test_voice_note_skipped(env):
+    cfg, client, build = env
+
+    async def go():
+        imp = await build()
+        await submit_and_process(imp, client, make_msg(1, None, mime="audio/ogg", voice=object()))
+        return await imp.store.get(1)
+
+    assert run(go()) is None
+    assert client.sent[-1][0].startswith("⚠️ Skipped")

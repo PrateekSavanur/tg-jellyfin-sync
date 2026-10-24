@@ -11,7 +11,7 @@ from telethon import TelegramClient
 from telethon.errors import RPCError
 from telethon.tl.custom import Message
 
-from . import naming
+from . import music, naming
 from .config import Settings
 from .jellyfin import Jellyfin
 from .naming import MediaInfo
@@ -39,8 +39,9 @@ class Importer:
         await self.store.bump_last_seen(msg.id)
         if not msg.document:
             return  # text, photos, and the bot's own status posts
-        if not naming.is_supported(msg.file.name, msg.file.mime_type):
-            await self._reply(msg.id, f"⚠️ Skipped `{msg.file.name or 'file'}`: not a video or subtitle file.")
+        supported = naming.is_supported(msg.file.name, msg.file.mime_type) or music.is_audio(msg.file.name, msg.file.mime_type)
+        if msg.voice or not supported:
+            await self._reply(msg.id, f"⚠️ Skipped `{msg.file.name or 'file'}`: not a video, subtitle or audio file.")
             return
         if await self.store.add(msg.id, msg.document.id, msg.file.name, msg.file.size):
             self.queue.put_nowait(msg.id)
@@ -82,7 +83,8 @@ class Importer:
         if msg is None or not msg.document:
             await self.store.set(msg_id, "failed", error="message was deleted")
             return
-        name = msg.file.name or f"video_{msg_id}{msg.file.ext or '.mp4'}"
+        kind = "audio" if (msg.file.mime_type or "").startswith("audio/") else "video"
+        name = msg.file.name or f"{kind}_{msg_id}{msg.file.ext or '.mp4'}"
         size = msg.file.size
 
         if size > self.cfg.max_file_size:
@@ -99,10 +101,12 @@ class Importer:
             await self._finish(msg, None, f"♻️ `{Path(prior).name}` is already in Jellyfin")
             return
 
-        info = naming.resolve(msg.file.name, msg.message)
+        # Songs are named from their tags after download; only video needs guessing + TMDB up front
+        is_song = music.is_audio(name, msg.file.mime_type)
+        info = None if is_song else naming.resolve(msg.file.name, msg.message)
         if info:
             info = await self.tmdb.enrich(info)
-        ext = (Path(name).suffix or msg.file.ext or ".mp4").lower()
+        ext = (Path(name).suffix or msg.file.ext or (".mp3" if is_song else ".mp4")).lower()
 
         free = shutil.disk_usage(self.cfg.staging_dir).free
         if free < size * 1.1:
@@ -115,6 +119,9 @@ class Importer:
         part = self.cfg.staging_dir / f"{msg_id}.part"
         try:
             await self.client.download_media(msg, file=str(part), progress_callback=self._progress(status.id, name))
+            if is_song:
+                await self._file_song(msg, status.id, part, ext)
+                return
             if info is None:
                 dest = _free_path(self.cfg.unsorted_dir / naming.sanitize(name))
                 dest.parent.mkdir(parents=True, exist_ok=True)
@@ -133,20 +140,21 @@ class Importer:
 
     async def _file(self, msg: Message, status_id: int | None, src: Path, info: MediaInfo, ext: str) -> None:
         """Moves a downloaded file into its library folder and announces it."""
-        dest = naming.build_path(info, ext, self.cfg.movies_dir, self.cfg.tv_dir)
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        if dest.exists() and dest.stat().st_size == src.stat().st_size:
-            src.unlink()  # identical file already in place
-        else:
-            dest = _free_path(dest)
-            os.replace(src, dest)  # same filesystem → atomic, Jellyfin never sees a partial file
-            dest.chmod(0o644)
-
+        dest = _place(src, naming.build_path(info, ext, self.cfg.movies_dir, self.cfg.tv_dir))
         await self.jellyfin.notify_created(dest)
         await self.store.set(msg.id, "done", dest=str(dest))
         kind = "subtitle" if ext in naming.SUBTITLE_EXTS else info.kind
         log.info("Imported message %s → %s", msg.id, dest)
         await self._finish(msg, status_id, f"✅ {info.label} {kind} is uploaded to Jellyfin")
+
+    async def _file_song(self, msg: Message, status_id: int, src: Path, ext: str) -> None:
+        """Files a downloaded song under Artist/Album from its tags (falling back to Telegram's metadata)."""
+        info = music.identify(src, msg.file.name, msg.file.title, msg.file.performer)
+        dest = _place(src, music.build_path(info, ext, self.cfg.music_dir))
+        await self.jellyfin.notify_created(dest)
+        await self.store.set(msg.id, "done", dest=str(dest))
+        log.info("Imported message %s → %s", msg.id, dest)
+        await self._finish(msg, status_id, f"✅ {info.label} song is uploaded to Jellyfin")
 
     async def _finish(self, msg: Message, status_id: int | None, text: str) -> None:
         """Posts the final message; with delete_after_import, removes the original and progress posts."""
@@ -198,6 +206,18 @@ class Importer:
         except RPCError as e:
             # Progress edits are cosmetic; never let them fail an import
             log.debug("Edit of status %s failed: %s", status_id, e)
+
+
+def _place(src: Path, dest: Path) -> Path:
+    """Moves src to dest (or a free `- vN` variant of it) and returns where it ended up."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if dest.exists() and dest.stat().st_size == src.stat().st_size:
+        src.unlink()  # identical file already in place
+        return dest
+    dest = _free_path(dest)
+    os.replace(src, dest)  # same filesystem → atomic, Jellyfin never sees a partial file
+    dest.chmod(0o644)
+    return dest
 
 
 def _free_path(path: Path) -> Path:

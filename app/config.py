@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     # Library paths must match what Jellyfin sees (same mount paths in both pods)
     movies_dir: Path = Path("/data/movies")
     tv_dir: Path = Path("/data/tvshows")
+    music_dir: Path = Path("/data/music")
     unsorted_dir: Path = Path("/data/unsorted")
     # Must be on the same filesystem as the libraries so the final move is an atomic rename
     staging_dir: Path = Path("/data/staging")

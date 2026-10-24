@@ -38,7 +38,7 @@ async def main() -> None:
     cfg = Settings()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     logging.getLogger("telethon").setLevel(logging.WARNING)
-    for d in (cfg.state_dir, cfg.staging_dir, cfg.unsorted_dir, cfg.movies_dir, cfg.tv_dir):
+    for d in (cfg.state_dir, cfg.staging_dir, cfg.unsorted_dir, cfg.movies_dir, cfg.tv_dir, cfg.music_dir):
         d.mkdir(parents=True, exist_ok=True)
 
     store = await Store.open(cfg.state_dir / "jobs.db")

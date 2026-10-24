@@ -1,6 +1,6 @@
 # tg-jellyfin-sync
 
-Imports video and subtitle files posted to a private Telegram channel into the Jellyfin libraries.
+Imports video, subtitle and audio files posted to a private Telegram channel into the Jellyfin libraries.
 
 1. Post a file to the channel (send as **File** to keep the original name and quality).
 2. The bot downloads it, names it the way Jellyfin expects, moves it into `movies/` or `tvshows/`,
@@ -11,6 +11,11 @@ Imports video and subtitle files posted to a private Telegram channel into the J
 A caption tag on the original post always overrides the filename. Files over 2 GiB are rejected,
 duplicates are detected by Telegram file id, and with `DELETE_AFTER_IMPORT` the original post is
 removed after a successful import.
+
+Songs (`.mp3`, `.flac`, `.m4a`, `.ogg`, `.opus`, `.wav`…) go to `music/Artist/Album/03 - Title.mp3`,
+named from the file's own tags, then Telegram's audio title/performer, then a `Artist - Title.mp3`
+filename. Songs without an album tag land in `Artist/Singles/`. Jellyfin reads the tags itself, so
+tag your files before uploading for the best result. Voice notes are skipped.
 
 ## Local run
 
@@ -29,7 +34,7 @@ Pushes to `main` run the tests, build `prateeksavanur/tg-jellyfin-sync`, and pin
 `kubernetes/deployment.yaml`; ArgoCD (Application in the homelab repo) rolls it out.
 
 - Runs on the media node and mounts `/mnt/media/library` at `/data`. Jellyfin mounts
-  `library/movies` and `library/tvshows` at the same `/data/...` paths, so the per-file refresh
+  `library/movies`, `library/tvshows` and `library/music` at the same `/data/...` paths, so the per-file refresh
   resolves. Staging lives in the same mount so the final move is an atomic rename.
 - Secrets (`tg-jellyfin-sync-secrets`) are created by Ansible: `roles/tg_jellyfin_sync` in the homelab repo.
 - Failed imports are sent to Homelert (`/webhook/tg-jellyfin-sync`).

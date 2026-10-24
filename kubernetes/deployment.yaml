@@ -29,7 +29,7 @@ spec:
           command:
             - sh
             - -c
-            - mkdir -p /data/movies /data/tvshows /data/unsorted /data/staging && chown 1000:1000 /data /data/* /state
+            - mkdir -p /data/movies /data/tvshows /data/music /data/unsorted /data/staging && chown 1000:1000 /data /data/* /state
           volumeMounts:
             - name: library
               mountPath: /data
@@ -49,12 +49,14 @@ spec:
               value: http://homelert.homelert.svc.cluster.local/webhook/tg-jellyfin-sync
             - name: DELETE_AFTER_IMPORT
               value: "true"
-            # Paths must match Jellyfin's mounts (/data/movies, /data/tvshows) so targeted
+            # Paths must match Jellyfin's mounts (/data/movies, /data/tvshows, /data/music) so targeted
             # refreshes resolve. Staging shares the /data mount so the final move is a rename.
             - name: MOVIES_DIR
               value: /data/movies
             - name: TV_DIR
               value: /data/tvshows
+            - name: MUSIC_DIR
+              value: /data/music
             - name: UNSORTED_DIR
               value: /data/unsorted
             - name: STAGING_DIR
